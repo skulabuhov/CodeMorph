@@ -164,3 +164,6 @@ sftp.json
 # Ignore venv
 venv/
 .venv/
+
+# Ignore data
+data/
