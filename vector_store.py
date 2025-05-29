@@ -55,8 +55,17 @@ class FaissVectorStore:
             self._rebuild_index()
 
     def save(self, path: str) -> None:
+        """Persist the FAISS index and stored texts under ``path``.
+
+        If the store is empty (``self.index`` is ``None``), only ``path``
+        ``.json`` containing an empty list will be written.
+        """
         self._ensure_index()
         os.makedirs(os.path.dirname(path), exist_ok=True)
+        if self.index is None:
+            with open(path + ".json", "w") as f:
+                json.dump([], f)
+            return
         faiss.write_index(self.index, path + ".index")
         with open(path + ".json", "w") as f:
             json.dump(self.texts, f)
