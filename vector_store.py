@@ -70,8 +70,12 @@ class FaissVectorStore:
             store.index = faiss.read_index(index_file)
             with open(texts_file) as f:
                 store.texts = json.load(f)
-            n = store.index.ntotal
-            if n:
-                vecs = store.index.reconstruct_n(0, n)
-                store.embeddings = vecs.tolist()
+            if store.index is not None:
+                n = store.index.ntotal
+                if n:
+                    vecs = store.index.reconstruct_n(0, n)
+                    store.embeddings = vecs.tolist()
+        else:
+            # If the index or text files are missing, an empty store is returned
+            pass
         return store
