@@ -1,6 +1,7 @@
 import os
 import json
 import math
+import asyncio
 from typing import Dict, List
 
 from aiogram import Bot, Dispatcher, types
@@ -20,6 +21,8 @@ dp = Dispatcher()
 
 # store chat history per user
 history: Dict[int, List[dict]] = {}
+# lock per user to prevent concurrent handling of multiple messages
+locks: Dict[int, asyncio.Lock] = {}
 vector_store = SimpleVectorStore(openai_client)
 
 ALLOWED_USERNAME = "skulabuhov"
@@ -56,54 +59,60 @@ async def handle_message(message: types.Message):
         await message.answer("Access denied.")
         return
 
-    await message.reply("сейчас подумаю...")
-
     user_id = message.from_user.id
-    await add_to_history(user_id, "user", message.text)
+    lock = locks.setdefault(user_id, asyncio.Lock())
+    if lock.locked():
+        await message.answer("Подожди пока закончу с ответом.")
+        return
 
-    msgs = history[user_id].copy()
+    async with lock:
+        await message.reply("сейчас подумаю...")
 
-    context = await prepare_context(message.text)
-    if context:
-        msgs.append({
-            "role": "system",
-            "content": "Дополнительный контекст:\n" + "\n".join(context)
-        })
+        await add_to_history(user_id, "user", message.text)
 
-    response = await openai_client.chat.completions.create(
-        model="gpt-4.1-nano",
-        messages=msgs,
-        tools=TOOLS,
-        tool_choice="auto",
-    )
+        msgs = history[user_id].copy()
 
-    reply = ""
-    msg = response.choices[0].message
-    if msg.tool_calls:
-        for call in msg.tool_calls:
-            func_name = call.function.name
-            args = json.loads(call.function.arguments)
-            if func_name in TOOL_FUNCTIONS:
-                result = await TOOL_FUNCTIONS[func_name](**args)
-                await add_to_history(user_id, "tool", result)
-                msgs.append({
-                    "role": "tool",
-                    "content": result,
-                    "tool_call_id": call.id,
-                    "name": func_name,
-                })
-        # call assistant again with tool results
+        context = await prepare_context(message.text)
+        if context:
+            msgs.append({
+                "role": "system",
+                "content": "Дополнительный контекст:\n" + "\n".join(context)
+            })
+
         response = await openai_client.chat.completions.create(
             model="gpt-4.1-nano",
             messages=msgs,
+            tools=TOOLS,
+            tool_choice="auto",
         )
-        msg = response.choices[0].message
-        reply = msg.content
-    else:
-        reply = msg.content
 
-    await add_to_history(user_id, "assistant", reply)
-    await message.answer(reply)
+        reply = ""
+        msg = response.choices[0].message
+        if msg.tool_calls:
+            for call in msg.tool_calls:
+                func_name = call.function.name
+                args = json.loads(call.function.arguments)
+                if func_name in TOOL_FUNCTIONS:
+                    result = await TOOL_FUNCTIONS[func_name](**args)
+                    await add_to_history(user_id, "tool", result)
+                    msgs.append({
+                        "role": "tool",
+                        "content": result,
+                        "tool_call_id": call.id,
+                        "name": func_name,
+                    })
+            # call assistant again with tool results
+            response = await openai_client.chat.completions.create(
+                model="gpt-4.1-nano",
+                messages=msgs,
+            )
+            msg = response.choices[0].message
+            reply = msg.content
+        else:
+            reply = msg.content
+
+        await add_to_history(user_id, "assistant", reply)
+        await message.answer(reply)
 
 
 async def main():
