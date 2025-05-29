@@ -160,3 +160,7 @@ sftp.json
 
 # Ignore .modal files
 .modal*toml
+
+# Ignore venv
+venv/
+.venv/
