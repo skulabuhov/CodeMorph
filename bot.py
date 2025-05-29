@@ -1,6 +1,5 @@
 import os
 import json
-import math
 import asyncio
 from typing import Dict, List
 
@@ -8,7 +7,7 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart
 from openai import AsyncOpenAI
 
-from vector_store import SimpleVectorStore
+from vector_store import FaissVectorStore
 from tools import TOOLS, TOOL_FUNCTIONS
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
@@ -23,7 +22,7 @@ dp = Dispatcher()
 history: Dict[int, List[dict]] = {}
 # lock per user to prevent concurrent handling of multiple messages
 locks: Dict[int, asyncio.Lock] = {}
-vector_store = SimpleVectorStore(openai_client)
+vector_stores: Dict[int, FaissVectorStore] = {}
 
 ALLOWED_USERNAME = "skulabuhov"
 
@@ -40,16 +39,28 @@ async def start_cmd(message: types.Message):
     await message.answer("Привет! Отправьте сообщение, и я постараюсь помочь.")
 
 
+def get_vector_store(user_id: int) -> FaissVectorStore:
+    store = vector_stores.get(user_id)
+    if store is None:
+        path = f"data/{user_id}"
+        store = FaissVectorStore.load(openai_client, path)
+        vector_stores[user_id] = store
+    return store
+
+
 async def add_to_history(user_id: int, role: str, content: str):
     msgs = history.setdefault(user_id, [])
     msgs.append({"role": role, "content": content})
     while len(msgs) > 15:
         old = msgs.pop(0)
-        await vector_store.add(old["content"])
+        store = get_vector_store(user_id)
+        await store.add(old["content"])
+        store.save(f"data/{user_id}")
 
 
-async def prepare_context(query: str) -> List[str]:
-    results = await vector_store.search(query)
+async def prepare_context(user_id: int, query: str) -> List[str]:
+    store = get_vector_store(user_id)
+    results = await store.search(query)
     return results
 
 
@@ -72,7 +83,7 @@ async def handle_message(message: types.Message):
 
         msgs = history[user_id].copy()
 
-        context = await prepare_context(message.text)
+        context = await prepare_context(user_id, message.text)
         if context:
             msgs.append({
                 "role": "system",
