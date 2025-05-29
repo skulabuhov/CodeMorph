@@ -23,11 +23,18 @@ history: Dict[int, List[dict]] = {}
 # lock per user to prevent concurrent handling of multiple messages
 locks: Dict[int, asyncio.Lock] = {}
 
-ALLOWED_USERNAME = "skulabuhov"
+_allowed = os.getenv("ALLOWED_USERNAMES")
+if _allowed:
+    ALLOWED_USERNAMES = {u.strip() for u in _allowed.split(",") if u.strip()}
+else:
+    ALLOWED_USERNAMES = {"skulabuhov"}
 
 
 def is_allowed(message: types.Message) -> bool:
-    return message.from_user and message.from_user.username == ALLOWED_USERNAME
+    return (
+        message.from_user
+        and message.from_user.username in ALLOWED_USERNAMES
+    )
 
 
 @dp.message(CommandStart())
